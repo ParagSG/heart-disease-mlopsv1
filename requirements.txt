@@ -1,7 +1,7 @@
 # Core ML
 pandas==2.1.4
 numpy==1.26.4
-scikit-learn==1.4.2
+scikit-learn==1.6.1
 xgboost==2.0.3
 
 # Experiment tracking
