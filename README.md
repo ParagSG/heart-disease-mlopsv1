@@ -128,6 +128,8 @@ kubectl get service heart-disease-api-svc
 
 ## GitHub Actions Secrets Required
 
+Added in the github. 
+
 | Secret | Description |
 |--------|-------------|
 | `ACR_LOGIN_SERVER` | e.g. `myacr.azurecr.io` |
