@@ -126,15 +126,91 @@ kubectl get service heart-disease-api-svc
 
 ---
 
-## GitHub Actions Secrets Required
+## CI/CD Pipeline – GitHub Actions
 
-Added in the github. 
+Three jobs run automatically on every push to `main`:
 
-| Secret | Description |
-|--------|-------------|
-| `ACR_LOGIN_SERVER` | e.g. `myacr.azurecr.io` |
+| Job | Name | What it does |
+|-----|------|-------------|
+| 1 | **Lint + Test** | `flake8` linting + `pytest` unit tests |
+| 2 | **Model Training Validation** | Trains models, validates ROC-AUC threshold |
+| 3 | **Docker Build + ACR Push** | Multi-stage Docker build, pushes to `paragmlopsacr.azurecr.io` |
+
+### GitHub Actions Secrets Required
+
+| Secret | Value |
+|--------|-------|
+| `ACR_LOGIN_SERVER` | `paragmlopsacr.azurecr.io` |
 | `ACR_USERNAME`     | ACR admin username |
 | `ACR_PASSWORD`     | ACR admin password |
+
+---
+
+## Deployment – Azure AKS
+
+| Resource | Value |
+|----------|-------|
+| Cluster | `mlops-aks` |
+| Region | East US |
+| Node SKU | `Standard_D2ds_v7` |
+| Replicas | 2 × `heart-disease-api` |
+| Container Registry | `paragmlopsacr.azurecr.io` |
+| API External IP | `172.210.109.108` |
+
+```bash
+# Start cluster
+az aks start --resource-group mlops-rg --name mlops-aks
+
+# Get credentials
+az aks get-credentials --resource-group mlops-rg --name mlops-aks
+
+# Deploy
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+
+# Check pods
+kubectl get pods
+kubectl get service heart-disease-api-svc
+
+# Test live API
+curl -X POST http://172.210.109.108/predict \
+  -H "Content-Type: application/json" \
+  -d '{"age":54,"sex":1,"cp":0,"trestbps":130,"chol":245,"fbs":0,
+       "restecg":0,"thalach":150,"exang":0,"oldpeak":1.4,"slope":1,"ca":0,"thal":2}'
+
+# Stop cluster (saves cost)
+az aks stop --resource-group mlops-rg --name mlops-aks
+```
+
+---
+
+## Monitoring – Prometheus + Grafana
+
+Deployed via `kube-prometheus-stack` Helm chart (v3.21.2) in the `monitoring` namespace.
+
+| Component | Details |
+|-----------|---------|
+| Prometheus | Scrapes `/metrics` from FastAPI via `prometheus-fastapi-instrumentator` |
+| Grafana | External IP: `20.75.254.127` — 18 pre-built Kubernetes dashboards |
+| Grafana Login | `admin` / `MLOps@2026` |
+| Stack Helm release | `monitoring` namespace |
+
+```bash
+# Install monitoring stack
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+
+# Check pods
+kubectl get pods -n monitoring
+
+# Get Grafana external IP
+kubectl get svc monitoring-grafana -n monitoring
+```
+
+**Live metrics observed:**
+- CPU Usage: `0.000533` cores
+- Memory (WSS): `134 MiB`
+- Network Rx: `82.7 b/s` | Tx: `75.0 b/s`
 
 ---
 
