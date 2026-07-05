@@ -1,0 +1,138 @@
+name: CI Pipeline – Heart Disease MLOps
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    name: Lint + Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8
+
+      - name: Lint with flake8
+        run: |
+          # Fail on syntax errors or undefined names; warn on style
+          flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --tb=short
+        env:
+          PYTHONPATH: src
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            .pytest_cache/
+            *.log
+
+  train-validate:
+    name: Model Training Validation
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download dataset
+        run: python data/download_data.py
+
+      - name: Run training
+        run: |
+          cd src
+          python train.py
+        env:
+          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+
+      - name: Verify model artifact exists
+        run: |
+          ls -lh models/best_model.joblib
+          echo "Model artifact verified"
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: models/best_model.joblib
+          retention-days: 7
+
+  docker-build:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    needs: train-validate
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: models/
+
+      - name: Build Docker image
+        run: docker build -t heart-disease-api:${{ github.sha }} .
+
+      - name: Run container smoke test
+        run: |
+          docker run -d --name api_test -p 8000:8000 heart-disease-api:${{ github.sha }}
+          sleep 10
+          curl -f http://localhost:8000/health || exit 1
+          curl -f -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"age":54,"sex":1,"cp":0,"trestbps":130,"chol":245,"fbs":0,"restecg":0,"thalach":150,"exang":0,"oldpeak":1.4,"slope":1,"ca":0,"thal":2}' \
+            | grep -q "prediction"
+          docker stop api_test
+
+      - name: Log in to Azure Container Registry
+        if: github.ref == 'refs/heads/main'
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username:     ${{ secrets.ACR_USERNAME }}
+          password:     ${{ secrets.ACR_PASSWORD }}
+
+      - name: Push image to ACR
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag heart-disease-api:${{ github.sha }} \
+            ${{ secrets.ACR_LOGIN_SERVER }}/heart-disease-api:${{ github.sha }}
+          docker tag heart-disease-api:${{ github.sha }} \
+            ${{ secrets.ACR_LOGIN_SERVER }}/heart-disease-api:latest
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/heart-disease-api:${{ github.sha }}
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/heart-disease-api:latest
