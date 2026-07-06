@@ -12,8 +12,9 @@ import logging
 import joblib
 import numpy as np
 import pandas as pd
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from prometheus_fastapi_instrumentator import Instrumentator
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -23,51 +24,58 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── App ────────────────────────────────────────────────────────────────────────
-app = FastAPI(
-    title="Heart Disease Prediction API",
-    description="MLOps Assignment 01 – AIMLCZG523, BITS Pilani WILP",
-    version="1.0.0",
-)
-
-# Prometheus metrics
-Instrumentator().instrument(app).expose(app)
-
 # ── Model loading ──────────────────────────────────────────────────────────────
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.path.dirname(__file__), "../models/best_model.joblib"))
 model = None
 
-@app.on_event("startup")
-def load_model():
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global model
     try:
         model = joblib.load(MODEL_PATH)
         logger.info(f"Model loaded from {MODEL_PATH}")
     except FileNotFoundError:
         logger.error(f"Model file not found at {MODEL_PATH}. Run src/train.py first.")
+    yield
+    # shutdown logic (if any) goes here
+
+
+# ── App ────────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="Heart Disease Prediction API",
+    description="MLOps Assignment 01 – AIMLCZG523, BITS Pilani WILP",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 
 # ── Request / Response schemas ─────────────────────────────────────────────────
 class PredictRequest(BaseModel):
-    age:      float = Field(..., example=54, description="Age in years")
-    sex:      float = Field(..., example=1,  description="1=male, 0=female")
-    cp:       float = Field(..., example=0,  description="Chest pain type (0-3)")
-    trestbps: float = Field(..., example=130, description="Resting blood pressure (mmHg)")
-    chol:     float = Field(..., example=245, description="Serum cholesterol (mg/dl)")
-    fbs:      float = Field(..., example=0,  description="Fasting blood sugar >120mg/dl (1=true)")
-    restecg:  float = Field(..., example=0,  description="Resting ECG results (0-2)")
-    thalach:  float = Field(..., example=150, description="Maximum heart rate achieved")
-    exang:    float = Field(..., example=0,  description="Exercise-induced angina (1=yes)")
-    oldpeak:  float = Field(..., example=1.4, description="ST depression induced by exercise")
-    slope:    float = Field(..., example=1,  description="Slope of peak exercise ST segment (0-2)")
-    ca:       float = Field(..., example=0,  description="Number of major vessels coloured by fluoroscopy (0-3)")
-    thal:     float = Field(..., example=2,  description="Thal: 1=normal, 2=fixed defect, 3=reversible defect")
+    age:      float = Field(..., ge=1,   le=120,  description="Age in years")
+    sex:      float = Field(..., ge=0,   le=1,    description="1=male, 0=female")
+    cp:       float = Field(..., ge=0,   le=4,    description="Chest pain type (0-3)")
+    trestbps: float = Field(..., ge=50,  le=300,  description="Resting blood pressure (mmHg)")
+    chol:     float = Field(..., ge=50,  le=700,  description="Serum cholesterol (mg/dl)")
+    fbs:      float = Field(..., ge=0,   le=1,    description="Fasting blood sugar >120mg/dl (1=true)")
+    restecg:  float = Field(..., ge=0,   le=2,    description="Resting ECG results (0-2)")
+    thalach:  float = Field(..., ge=50,  le=250,  description="Maximum heart rate achieved")
+    exang:    float = Field(..., ge=0,   le=1,    description="Exercise-induced angina (1=yes)")
+    oldpeak:  float = Field(..., ge=0.0, le=10.0, description="ST depression induced by exercise")
+    slope:    float = Field(..., ge=0,   le=3,    description="Slope of peak exercise ST segment (0-2)")
+    ca:       float = Field(..., ge=0,   le=4,    description="Number of major vessels coloured by fluoroscopy (0-3)")
+    thal:     float = Field(..., ge=0,   le=7,    description="Thal: 1=normal, 2=fixed defect, 3=reversible defect")
 
 
 class PredictResponse(BaseModel):
-    prediction:   int
-    label:        str
-    confidence:   float
+    model_config = ConfigDict(protected_namespaces=())
+
+    prediction:    int
+    label:         str
+    confidence:    float
     model_version: str = "1.0.0"
 
 
