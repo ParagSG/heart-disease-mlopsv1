@@ -120,13 +120,13 @@ def test_predict_negative_age():
 
 
 def test_predict_extreme_values():
-    """Extreme but type-valid values should still return a prediction."""
+    """Boundary-valid extreme values should still return a prediction."""
     mock_model.predict.return_value       = np.array([1])
     mock_model.predict_proba.return_value = np.array([[0.1, 0.9]])
     payload = dict(VALID_PAYLOAD)
-    payload["age"]     = 120
-    payload["chol"]    = 999
-    payload["thalach"] = 250
+    payload["age"]     = 120   # le=120
+    payload["chol"]    = 700   # le=700
+    payload["thalach"] = 250   # le=250
     response = client.post("/predict", json=payload)
     assert response.status_code == 200
     assert response.json()["prediction"] in [0, 1]
