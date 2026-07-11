@@ -32,6 +32,7 @@ heart-disease-mlops/
 ├── .github/workflows/ci.yml    # GitHub Actions CI/CD pipeline
 ├── Dockerfile                  # Multi-stage Docker build
 ├── requirements.txt
+├── env.yml                     # Conda environment file
 └── README.md
 ```
 
@@ -40,10 +41,18 @@ heart-disease-mlops/
 ## Quick Start
 
 ### 1. Install dependencies
+
+**Option A – pip (venv):**
 ```bash
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+**Option B – Conda:**
+```bash
+conda env create -f env.yml
+conda activate heart-disease-mlops
 ```
 
 ### 2. Download dataset
